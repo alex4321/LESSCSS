@@ -1,0 +1,126 @@
+<?php
+
+/*
+ * @return string Drupal installation file system path
+ */
+function _less_base_path() {
+  return realpath(".");
+}
+
+/*
+ * @return string directory for saving result LESS
+ */
+function _less_out_directory() {
+  $path = _less_base_path() . "/sites/default/files/less-converted";
+  if(!file_exists($path)) {
+    mkdir($path);
+  }
+  return $path;
+}
+
+/*
+ * Try to build CSS
+ * @param string $full_name - source LESS filename
+ * @param string $output_name - result CSS filename
+ * @return bool - TRUE if success
+ */
+function _less_build_less(string $full_name, string $output_name) {
+  module_load_include('php', 'less', 'lessphp/lessc.inc');
+
+  $less = new lessc;
+  try {
+    $less->checkedCompile($full_name, $output_name);
+    return TRUE;
+  }
+  catch(exception $e) {
+    drupal_set_message("Invalid LESS : " . $e->getMessage());
+    return FALSE;
+  }
+}
+
+/*
+ * Generate output CSS file for this LESS
+ * @param string $full_name - LESS filename
+ * @param int $modificated - LESS file mtime
+ */
+function _less_file_full_out_name($full_name, $modificated) {
+  $outname = _less_out_directory() . "/" . base64_encode($full_name) . "." . $modificated . ".css";
+
+  return $outname;
+}
+
+/*
+ * Generate LESS by CSS file
+ * @param string $filename - LESS filename
+ * @return string CSS file name
+ */
+function _less_parse_file($filename) {
+  $full_name = _less_base_path() . "/" . $filename;
+  $modificated = filemtime($full_name);
+  $out_name = _less_file_full_out_name($full_name, $modificated);
+  if(!file_exists($out_name) || (filemtime($out_name) < $modificated)) {
+    _less_build_less($full_name, $out_name);
+  }
+
+  return $out_name;
+}
+
+function _less_get_styles_list($css, $skip_alter) {
+  global $theme_info;
+
+  if (!isset($css) && function_exists('_drupal_add_css')) {
+    $css = _drupal_add_css();
+  }
+
+  // Allow modules and themes to alter the CSS items.
+  if (!$skip_alter && function_exists('drupal_alter')) {
+    drupal_alter('css', $css);
+  }
+
+  // Sort CSS items, so that they appear in the correct order.
+  uasort($css, 'drupal_sort_css_js');
+
+  // Allow themes to remove CSS files by basename.
+  if (!empty($theme_info->stylesheets_remove)) {
+    foreach ($css as $key => $options) {
+      if (isset($options['basename']) && isset($theme_info->stylesheets_remove[$options['basename']])) {
+        unset($css[$key]);
+      }
+    }
+  }
+  // Allow themes to conditionally override CSS files by basename.
+  if (!empty($theme_info->stylesheets_override)) {
+    foreach ($css as $key => $options) {
+      if (isset($options['basename']) && isset($theme_info->stylesheets_override[$options['basename']])) {
+        $css[$key]['data'] = $theme_info->stylesheets_override[$options['basename']];
+      }
+    }
+  }
+
+  return $css;
+}
+
+function less_get_styles($css = NULL, $skip_alter = FALSE) {
+  // Render the HTML needed to load the CSS.
+  $styles = array(
+    '#type' => 'styles',
+    '#items' => _less_get_styles_list($css, $skip_alter),
+  );
+  if (!empty($setting)) {
+    $styles['#attached']['js'][] = array('type' => 'setting', 'data' => $setting);
+  }
+
+  foreach($styles['#items'] as $key=>$item) {
+    $name = $item['data'];
+    if(pathinfo($name, PATHINFO_EXTENSION)=='less') {
+      global $base_url;
+      $file_name = _less_parse_file($name);
+      $result_name = str_replace(_less_base_path(), $base_url, $file_name);
+
+
+      $styles['#items'][$key]['data'] = $result_name;
+    }
+  }
+
+  return drupal_render($styles);
+}

@@ -1,0 +1,6 @@
+name: LESS
+type: module
+description: 'Less CSS preprocessor.'
+package: Appereance
+version: 0.1
+core: 8.x
